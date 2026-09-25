@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Personal AI — v6</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+:root{--bg:#f4f7fb;--card:#fff;--ink:#152033;--muted:#667085;--line:#e6eaf0;--accent:#3867e8;--good:#16794b}
+*{box-sizing:border-box} body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--ink)}
+header{background:#111827;color:white;padding:18px 24px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+header h1{font-size:20px;margin:0} header small{color:#cbd5e1}
+.wrap{max-width:1050px;margin:26px auto;padding:0 18px}.hero{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:24px}
+.hero h2{margin:0 0 8px}.hero p{color:var(--muted);margin:0 0 18px}
+button{border:0;border-radius:10px;padding:11px 15px;font-weight:700;cursor:pointer;background:var(--accent);color:white}
+button.secondary{background:#eef2ff;color:#2f55bd} button.ghost{background:#f2f4f7;color:#344054}
+.status{font-size:13px;margin-left:8px;color:var(--muted)} .ok{color:var(--good)}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;min-height:180px}
+.card h3{margin:0 0 12px;font-size:17px}.item{padding:11px 0;border-top:1px solid var(--line);line-height:1.45}
+.item:first-of-type{border-top:0}.muted{color:var(--muted)}.action{background:#f8fafc;border-radius:12px;padding:13px;margin-top:10px}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+footer{text-align:center;color:var(--muted);font-size:12px;padding:26px}
+@media(max-width:720px){.grid{grid-template-columns:1fr}header{align-items:flex-start;flex-direction:column}}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>My Personal AI <span style="opacity:.65">v6</span></h1><small>Your Data. Your Rules. Your Personal AI.</small></div>
+  <div><button id="connectBtn" class="secondary">Connect Google</button><span id="conn" class="status">Not connected</span></div>
+</header>
+<div class="wrap">
+  <section class="hero">
+    <h2>Good morning 👋</h2>
+    <p>One view across the services you authorize. Generate a live brief from Gmail, Calendar and weather.</p>
+    <button id="briefBtn">Generate My Brief</button>
+    <span id="briefStatus" class="status"></span>
+  </section>
+
+  <div class="grid">
+    <section class="card"><h3>📧 Needs Attention</h3><div id="mail"><span class="muted">Generate your brief to check Gmail.</span></div></section>
+    <section class="card"><h3>📅 Today's Schedule</h3><div id="cal"><span class="muted">Generate your brief to check Calendar.</span></div></section>
+    <section class="card"><h3>🌦 Weather</h3><div id="weather"><span class="muted">Weather loads for Chennai in this demo.</span></div></section>
+    <section class="card"><h3>✨ Suggested Actions</h3><div id="suggest"><span class="muted">Suggestions appear after your brief is generated.</span></div></section>
+  </div>
+</div>
+<footer>Prototype: live integrations + deterministic orchestration shell. AI reasoning layer can be added through a secure backend.</footer>
+
+<script>
+const CLIENT_ID = "638436880467-6fi7jr9t1jpee0iogj39tn47vcprhai3.apps.googleusercontent.com";
+const SCOPES = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.events";
+let tokenClient, accessToken = "";
+
+function initToken(){
+  if(!window.google?.accounts?.oauth2){ setTimeout(initToken,300); return; }
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID, scope: SCOPES,
+    callback: r => {
+      if(r.error){ document.getElementById("conn").textContent="Connection failed"; return; }
+      accessToken=r.access_token;
+      document.getElementById("conn").innerHTML='<span class="ok">● Connected</span>';
+      document.getElementById("connectBtn").textContent="Reconnect Google";
+    }
+  });
+}
+initToken();
+
+document.getElementById("connectBtn").onclick=()=>tokenClient?.requestAccessToken({prompt: accessToken ? "" : "consent"});
+
+async function api(url, opts={}){
+  opts.headers = Object.assign({}, opts.headers||{}, {Authorization:"Bearer "+accessToken});
+  const r=await fetch(url,opts);
+  if(!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+function b64(s){ s=s.replace(/-/g,'+').replace(/_/g,'/'); try{return decodeURIComponent(escape(atob(s)))}catch(e){return atob(s)}}
+function bodyText(payload){
+  if(payload?.body?.data) return b64(payload.body.data);
+  for(const p of payload?.parts||[]){ if(p.mimeType==="text/plain"&&p.body?.data) return b64(p.body.data); }
+  return "";
+}
+async function loadMail(){
+  const box=document.getElementById("mail");
+  const list=await api('https://gmail.googleapis.com/gmail/v1/users/me/messages?q='+encodeURIComponent('subject:"School Registration"')+'&maxResults=3');
+  if(!list.messages?.length){box.innerHTML='<span class="muted">No matching action emails found.</span>'; return null;}
+  const m=await api('https://gmail.googleapis.com/gmail/v1/users/me/messages/'+list.messages[0].id+'?format=full');
+  const hs=Object.fromEntries((m.payload.headers||[]).map(x=>[x.name.toLowerCase(),x.value]));
+  const txt=bodyText(m.payload).replace(/\*/g,' ').replace(/\s+/g,' ').trim();
+  box.innerHTML=`<div class="item"><b>${hs.subject||"School Registration"}</b><br><span class="muted">${txt.slice(0,420)}</span></div>`;
+  return {subject:hs.subject||"School Registration", text:txt};
+}
+async function loadCalendar(){
+  const box=document.getElementById("cal");
+  const now=new Date(), end=new Date(now); end.setHours(23,59,59,999);
+  const url='https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&maxResults=8&timeMin='+encodeURIComponent(now.toISOString())+'&timeMax='+encodeURIComponent(end.toISOString());
+  const d=await api(url);
+  if(!d.items?.length){box.innerHTML='<span class="muted">No remaining events today.</span>'; return [];}
+  box.innerHTML=d.items.map(e=>`<div class="item"><b>${e.summary||"(No title)"}</b><br><span class="muted">${new Date(e.start.dateTime||e.start.date).toLocaleString()}</span></div>`).join('');
+  return d.items;
+}
+async function loadWeather(){
+  const box=document.getElementById("weather");
+  // Chennai demo coordinates; public Open-Meteo API, no secret required.
+  const r=await fetch('https://api.open-meteo.com/v1/forecast?latitude=13.0827&longitude=80.2707&current=temperature_2m,precipitation,weather_code&timezone=Asia%2FKolkata');
+  if(!r.ok) throw new Error("Weather unavailable");
+  const d=await r.json(), c=d.current;
+  box.innerHTML=`<div class="item"><b>Chennai</b><br>${c.temperature_2m}°C<br><span class="muted">Current precipitation: ${c.precipitation} mm</span></div>`;
+  return c;
+}
+async function createReminder(){
+  if(!accessToken){alert("Connect Google first.");return;}
+  const start=new Date("2026-09-29T19:00:00+05:30"), end=new Date("2026-09-29T19:15:00+05:30");
+  const event={summary:"Complete school registration",description:"Suggested by My Personal AI. Complete the school registration form and payment before the Sep 30 deadline.",start:{dateTime:start.toISOString(),timeZone:"Asia/Kolkata"},end:{dateTime:end.toISOString(),timeZone:"Asia/Kolkata"}};
+  await api('https://www.googleapis.com/calendar/v3/calendars/primary/events',{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(event)});
+  document.getElementById("suggest").innerHTML='<div class="action"><b class="ok">✓ Reminder created</b><br><span class="muted">Sep 29 at 7:00 PM — Complete school registration</span></div>';
+}
+document.getElementById("briefBtn").onclick=async()=>{
+  const st=document.getElementById("briefStatus");
+  if(!accessToken){st.textContent="Connect Google first.";return;}
+  st.textContent="Building live brief…";
+  try{
+    const [mail,events,weather]=await Promise.all([loadMail(),loadCalendar(),loadWeather()]);
+    const sug=document.getElementById("suggest");
+    if(mail){
+      sug.innerHTML=`<div class="action"><b>School registration deadline is approaching</b><br><span class="muted">Registration and payment are due September 30.</span><div class="actions"><button onclick="createReminder()">Remind me Sep 29, 7 PM</button><button class="ghost" onclick="this.closest('.action').remove()">Dismiss</button></div></div>`;
+    } else sug.innerHTML='<span class="muted">No immediate action suggested.</span>';
+    st.innerHTML='<span class="ok">✓ Live brief ready</span>';
+  }catch(e){console.error(e);st.textContent="Could not build the full brief. Reconnect Google and try again.";}
+};
+</script>
+</body>
+</html>
